@@ -134,6 +134,27 @@ class RemoteFileServer:
             self.handle_close_file(data, client_socket)
         elif command == "change_file":
             self.handle_change_file(data, client_socket)
+        elif command == "exec_cmd":
+            self.handle_exec_cmd(data, client_socket)
+
+    def handle_exec_cmd(self, data, client_socket):
+        exec_cmd = data["exec_cmd"]
+        print(exec_cmd)
+        process = subprocess.Popen(exec_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+
+        print(str(stdout))
+        response = {
+            "command": "exec_cmd",
+            "exec_cmd_id": 10,
+            "stdout": str(stdout),
+            "stderr": str(stderr),
+            "ret": 1,
+        }
+
+        #response_data = json.dumps(response)
+        response_data = json.dumps(response)
+        client_socket.send(f"{response_data}\n".encode("utf-8"))
 
     def handle_open_file(self, data, client_socket):
         path = data["path"]
