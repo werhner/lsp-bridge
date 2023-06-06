@@ -2220,6 +2220,8 @@ SymbolKind (defined in the LSP)."
     ;; Always enable lsp-bridge for remote file.
     ;; Remote file can always edit and update content even some file haven't corresponding lsp server, such as *.txt
     (lsp-bridge-mode 1)
+    ;; enable tramp
+    (setq-local buffer-file-name (format "/bridge:home:%s" path))
     ))
 
 (defun lsp-bridge-remote-kill-buffer ()

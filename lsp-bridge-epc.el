@@ -279,7 +279,7 @@ is a short cut of following code:
 (defun lsp-bridge-epc-uid ()
   (cl-incf lsp-bridge-epc-uid))
 
-(defvar lsp-bridge-epc-accept-process-timeout 150
+(defvar lsp-bridge-epc-accept-process-timeout 50
   "Asynchronous timeout time. (msec)")
 
 (put 'epc-error 'error-conditions '(error epc-error))
@@ -647,7 +647,7 @@ If an exception is occurred, this function throws the error."
       (save-current-buffer
         (accept-process-output
          (lsp-bridge-epc-connection-process (lsp-bridge-epc-manager-connection mngr))
-         0 lsp-bridge-epc-accept-process-timeout t)))
+         0 0 t)))
     (if (and (consp result) (eq 'error (car result)))
         (error (cdr result)) result)))
 

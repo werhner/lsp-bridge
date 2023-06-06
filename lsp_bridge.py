@@ -58,6 +58,8 @@ REMOTE_FILE_SYNC_CHANNEL = 9999
 REMOTE_FILE_COMMAND_CHANNEL = 9998
 REMOTE_FILE_ELISP_CHANNEL = 9997
 
+REMOTE_FILE_DICTIONARY = {}
+
 class LspBridge:
     def __init__(self, args):
         # Check running environment.
@@ -245,6 +247,22 @@ class LspBridge:
         })
 
     @threaded
+    def exec_remote_cmd(self, remote_file_host, remote_exec_cmd):
+        self.send_remote_file_message(remote_file_host, {
+            "command": "exec_cmd",
+            "exec_cmd": remote_exec_cmd,
+        })
+        
+    def sync_exec_remote_cmd(self, remote_file_host, remote_exec_cmd):
+        self.send_remote_file_message(remote_file_host, {
+            "command": "exec_cmd",
+            "exec_cmd": remote_exec_cmd,
+        })
+        self.event_obj = threading.Event()
+        self.event_obj.wait()
+        return self.stdout
+
+    @threaded
     def close_remote_file(self, remote_file_host, remote_file_path):
         self.send_remote_file_message(remote_file_host, {
             "command": "close_file",
@@ -256,6 +274,7 @@ class LspBridge:
     def handle_remote_file_message(self, message):
         data = parse_json_content(message)
         command = data["command"]
+        #message_emacs(f"reciver {command}")
 
         if command == "open_file":
             if "error" in data:
@@ -263,8 +282,19 @@ class LspBridge:
             else:
                 server = data["server"]
                 path = data["path"]
+                #REMOTE_FILE_DICTIONARY[path]["file-directory-p"] = 1
+                #REMOTE_FILE_DICTIONARY[path]["file-attributed"] = 2
+                #REMOTE_FILE_DICTIONARY[path]["file-"] = 3
                 eval_in_emacs("lsp-bridge-open-remote-file--response", data["server"], path, string_to_base64(data["content"]), data["jump_define_pos"])
                 message_emacs(f"Open file {server}:{path}")
+
+        if command == "exec_cmd":
+            stdout = data["stdout"]
+            stderr = data["stderr"]
+            self.stdout = stdout
+            self.event_obj.set()
+            #message_emacs(f"data:{stdout}")
+            eval_in_emacs("lsp-bridge-command-callback", 0, stdout, stderr)
 
     @threaded
     def handle_lsp_message(self, message):
