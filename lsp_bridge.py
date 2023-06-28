@@ -679,6 +679,8 @@ class LspBridge:
 
     def build_file_action_function(self, name):
         def _do(filepath, *args):
+            if '/ssh:' in filepath:
+                return
             open_file_success = True
 
             if not is_in_path_dict(FILE_ACTION_DICT, filepath):

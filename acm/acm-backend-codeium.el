@@ -157,11 +157,13 @@
 
 (defun acm-backend-codeium-candidate-expand (candidate-info bound-start &optional preview)
   ;; We need replace whole area with codeium label.
-  (let ((end-position (line-end-position)))
+  (let ((end-position (line-end-position))
+        (start-position (line-beginning-position))
+        (middle-position (point)))
     (forward-line (- (plist-get candidate-info :line) (count-lines (point-min) (line-beginning-position))))
     (if preview
         (acm-preview-create-overlay (point) end-position (plist-get candidate-info :label))
-      (delete-region (point) end-position)
+      (delete-region start-position middle-position)
       (insert (plist-get candidate-info :label))
       (when acm-backend-codeium-accept
         (lsp-bridge-call-async
