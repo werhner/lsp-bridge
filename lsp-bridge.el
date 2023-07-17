@@ -2139,6 +2139,10 @@ SymbolKind (defined in the LSP)."
                              (= after-point buffer-max)
                              max-num-results))))
 
+(defun lsp-bridge-ctags-complete ()
+  (interactive)
+  (lsp-bridge-call-async "ctags_complete" (format "%S" (citre-tags-completion-default-filter "defun")) (buffer-file-name)))
+
 (defun lsp-bridge-codeium-complete ()
   (interactive)
   (let ((all-text (buffer-substring-no-properties (point-min) (point-max)))

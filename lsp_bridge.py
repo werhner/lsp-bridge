@@ -29,6 +29,7 @@ from functools import wraps
 from pathlib import Path
 
 from epc.server import ThreadingEPCServer
+from core.ctags import Ctags
 
 from core.fileaction import (create_file_action_with_single_server,
                              create_file_action_with_multi_servers,
@@ -712,6 +713,11 @@ class LspBridge:
 
     def tabnine_complete(self, before, after, filename, region_includes_beginning, region_includes_end, max_num_results):
         self.tabnine.complete(before, after, filename, region_includes_beginning, region_includes_end, max_num_results)
+
+    @threaded
+    def ctags_complete(self, symbol, filename):
+        ctags = Ctags()
+        ctags.make_complete(symbol, filename)
 
     def codeium_complete(self, cursor_offset, editor_language, tab_size, text, insert_spaces, prefix, language):
         self.codeium.complete(cursor_offset, editor_language, tab_size, text, insert_spaces, prefix, language)
