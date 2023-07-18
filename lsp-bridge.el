@@ -2143,6 +2143,25 @@ SymbolKind (defined in the LSP)."
   (interactive)
   (lsp-bridge-call-async "ctags_complete" (format "%S" (citre-tags-completion-default-filter "defun")) (buffer-file-name)))
 
+(require 'xref)
+
+(defun lsp-bridge-xref--make-object (tag)
+  "Make xref object of TAG."
+  (let\* ((path (plist-get tag :ext-abspath))
+          (line (plist-get tag :line))
+          (str (plist-get tag :str))
+          (annotation (plist-get tag :annotation)))
+         (xref-make
+          (concat (propertize (concat "(" annotation ") ") 'face 'citre-tag-annotation-face) str)
+          (xref-make-file-location path line 0))))
+
+(defun lsp-bridge-xref-callback (tags)
+  (let ((fetcher (lambda () (mapcar #'lsp-bridge-xref--make-object tags))))
+    (xref--show-defs fetcher nil)))
+
+(defun lsp-bridge-ctags-find-def (symbol filename)
+  (lsp-bridge-call-async "ctags_find_def" symbol filename))
+
 (defun lsp-bridge-codeium-complete ()
   (interactive)
   (let ((all-text (buffer-substring-no-properties (point-min) (point-max)))

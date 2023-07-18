@@ -718,6 +718,11 @@ class LspBridge:
     def ctags_complete(self, symbol, filename):
         ctags = Ctags()
         ctags.make_complete(symbol, filename)
+        
+    @threaded
+    def ctags_find_def(self, symbol, filename):
+        ctags = Ctags()
+        ctags.find_definition(symbol, filename)
 
     def codeium_complete(self, cursor_offset, editor_language, tab_size, text, insert_spaces, prefix, language):
         self.codeium.complete(cursor_offset, editor_language, tab_size, text, insert_spaces, prefix, language)

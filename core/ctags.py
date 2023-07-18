@@ -8,14 +8,14 @@ DEFAULT_FILTER_CMD = '(not (or (and $extras ((string->regexp "(^|,) ?(anonymous|
 DEFAULT_SORTER_CMD = '(<or> (if (and $name &name) (<> (length $name) (length &name)) 0) (if (and $name &name) (<> $name &name) 0))'
 
 class Ctags:    
-    def run_cmd_in_path(self, cmd, filepath):
-        if os.path.isfile(filepath):
-            cwd = os.path.dirname(filepath)
+    def run_cmd_in_path(self, cmd, filename, in_shell=False):
+        if os.path.isfile(filename):
+            cwd = os.path.dirname(filename)
         else:
-            cwd = filepath
+            cwd = filename
 
-        # print(cmd)
-        result = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True)
+        #print(cmd)
+        result = subprocess.run(cmd, cwd=cwd, shell= in_shell, capture_output=True, text=True)
 
         # Get the output as a string
         output = ""
@@ -30,7 +30,19 @@ class Ctags:
         lines = [l for l in lines if l != '']
 
         return lines
-    
+
+    def get_emacs_path(self, filename):
+        emacs_path = filename.rsplit(":", 1)
+
+        if len(emacs_path) == 2:
+            remote_method = emacs_path[0]
+            true_filepath = emacs_path[1]
+        else:
+            remote_method = ""
+            true_filepath = emacs_path[0]
+
+        return (remote_method, true_filepath)
+
     def parse_tag_line(self, line):
         if line == '':
             return None
@@ -96,17 +108,19 @@ class Ctags:
         candidate = {}
         tagname = tag["tagname"]
 
-        kind = tag.get("kind", "NOKIND")
         path = tag.get("tagfile", "")
-        line = tag.get("line", "")
+        line = int(tag.get("line", "1"))
+        pattern = tag.get("tagaddress", "")
+        annotation = self.make_tag_annotation(tag)
         
         ext_abspath = os.path.join(rootdir, path)
 
-        candidate["name"] = tagname
         candidate["ext-abspath"] = ext_abspath
-        candidate["kind"] = kind
         candidate["line"] = line
-        
+        candidate["str"] = pattern
+        candidate["annotation"] = annotation
+
+        return candidate
         
     def make_complete(self, symbol, filename):
         cmd = self.readtags_get_cmd("", symbol, "prefix", False, DEFAULT_FILTER_CMD, DEFAULT_SORTER_CMD, "")
@@ -120,17 +134,25 @@ class Ctags:
         # return list(candidates)
 
     def find_definition(self, symbol, filename):
+        (remote_method, filename) = self.get_emacs_path(filename)
+        
         cmd = self.readtags_get_cmd("", symbol, "exact", False, "", "", "")
         
-        rootdir = self.run_cmd_in_path("readtags -D | grep 'TAG_PROC_CWD' | cut -f2", filename)
+        rootdir = self.run_cmd_in_path("readtags -D | grep 'TAG_PROC_CWD' | cut -f2", filename, in_shell=True)
         if rootdir:
             rootdir = rootdir[0]
+        else:
+            rootdir = ""
 
-        print(rootdir)
+        #print(rootdir)
         lines = self.run_cmd_in_path(cmd, filename)
-        print(lines)
+        #print(lines)
         tags = map(self.parse_tag_line, lines)
-        
+        candidates = map(lambda tag: self.make_ctags_jump(tag, rootdir), tags)
+
+        candidates = list(candidates)
+        #print(candidates)
+        eval_in_emacs("lsp-bridge-xref-callback", candidates)
 
     def readtags_get_cmd(self, tagsfile, name, match, case_fold, filter, sorter, action):
         extras = ("-Ene" +
@@ -146,7 +168,6 @@ class Ctags:
             cmd.append("-t")
             cmd.append(tagsfile)
 
-        cmd.append("-t " + "/Users/werhner/code/emacs/tags")
         # filter expresion
         if filter:
             cmd.append("-Q")
@@ -159,9 +180,17 @@ class Ctags:
         cmd.append(extras)
 
         # action
-        cmd.append(action if action else "-l" if not name else ("- " + name))
+        #cmd.append(action if action else "-l" if not name else ("- " + name))
+        if action:
+            cmd.append(action)
+        else:
+            if not name:
+                cmd.append("-l")
+            else:
+                cmd.append("-")
+                cmd.append(name)
 
-        cmd = " ".join(cmd)
+        #cmd = " ".join(cmd)
         return cmd
         
 # (citre-tags-completion-default-filter "DEFUN")
