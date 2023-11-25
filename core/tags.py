@@ -25,11 +25,16 @@ class tags():
         self.current_cursor_offset = 0
         self.lock = threading.RLock()
 
-    def run_cmd_in_path(self, cmd, filename, in_shell=False):
-        if os.path.isfile(filename):
-            cwd = os.path.dirname(filename)
+    def get_dir(self, filepath):
+        if os.path.isfile(filepath):
+            dir = os.path.dirname(filepath)
         else:
-            cwd = filename
+            dir = filepath
+
+        return dir
+
+    def run_cmd_in_path(self, cmd, filename, in_shell=False):
+        cwd = self.get_dir(filename)
 
         result = subprocess.run(cmd, cwd=cwd, shell=in_shell, capture_output=True, text=True)
 

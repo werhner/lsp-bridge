@@ -1708,6 +1708,26 @@ Off by default."
   (if (functionp lsp-bridge-find-ref-fallback-function)
       (funcall lsp-bridge-find-ref-fallback-function position)))
 
+(require 'xref)
+
+(defun lsp-bridge-xref-callback (tags)
+  (let ((fetcher (lambda () (mapcar (lambda (tag)
+                                      (let* ((path (plist-get tag :ext-abspath))
+                                             (line (plist-get tag :line))
+                                             (column (plist-get tag :column))
+                                             (summary (plist-get tag :summary)))
+                                        (xref-make
+                                         summary
+                                         (xref-make-file-location path line column))))
+                                    tags))))
+    (xref-show-xrefs fetcher nil)))
+
+(defun lsp-bridge-gtags-find-def (symbol filename)
+  (lsp-bridge-call-async "gtags_find_def" symbol filename))
+
+(defun lsp-bridge-gtags-find-ref (symbol filename)
+  (lsp-bridge-call-async "gtags_find_ref" symbol filename))
+
 (defun lsp-bridge-references--popup (references-content references-counter position)
   (if (> references-counter 0)
       (progn

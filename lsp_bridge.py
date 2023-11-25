@@ -109,6 +109,14 @@ class LspBridge:
     def gtags_complete(self, symbol, filename, cursor_offset):
         self.gtags.make_complete(symbol, filename, cursor_offset)
 
+    @threaded
+    def gtags_find_def(self, symbol, filename):
+        self.gtags.find_definition(symbol, filename)
+
+    @threaded
+    def gtags_find_ref(self, symbol, filename):
+        self.gtags.find_reference(symbol, filename)
+
     def init_search_backends(self):
         # Init tabnine.
         self.tabnine = TabNine()

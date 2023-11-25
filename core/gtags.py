@@ -20,7 +20,6 @@ import re
 import os
 
 from core.utils import *
-
 from core.tags import tags
 
 class Gtags(tags):
@@ -48,6 +47,44 @@ class Gtags(tags):
         candidates = map(self.make_gtags_acm_candidate, lines)
 
         self.dispatch("gtags", list(candidates), cursor_offset)
+
+    def find_definition(self, symbol, filepath):
+        if not filepath:
+            return
+
+        dir_name = self.get_dir(filepath)
+        cmd = self.global_get_cmd(symbol, "definition", True, None)
+        lines = self.run_cmd_in_path(cmd, filepath)
+
+        def make_xref(line):
+            gtags_result = line.split(":", 2)
+            return {"ext-abspath": os.path.join(dir_name, gtags_result[0]),
+                    "line": int(gtags_result[1]),
+                    "column": 0,
+                    "summary": gtags_result[2]}
+
+        candidates = map(make_xref, lines)
+        #print(list(candidates))
+        eval_in_emacs("lsp-bridge-xref-callback", list(candidates))
+
+    def find_reference(self, symbol, filepath):
+        if not filepath:
+            return
+
+        dir_name = self.get_dir(filepath)
+        cmd = self.global_get_cmd(symbol, "reference", True, None)
+        lines = self.run_cmd_in_path(cmd, filepath)
+
+        def make_xref(line):
+            gtags_result = line.split(":", 2)
+            return {"ext-abspath": os.path.join(dir_name, gtags_result[0]),
+                    "line": int(gtags_result[1]),
+                    "column": 0,
+                    "summary": gtags_result[2]}
+
+        candidates = map(make_xref, lines)
+        #print(list(candidates))
+        eval_in_emacs("lsp-bridge-xref-callback", list(candidates))
 
     def global_get_cmd(self, name, mode, case_fold, start_file):
         cmd = []
