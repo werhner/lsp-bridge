@@ -9,8 +9,8 @@
   :type 'integer
   :group 'acm-backend-ctags)
 
-(defcustom acm-enable-ctags t
-  "Popup search words completions when this option is turn on."
+(defcustom acm-enable-ctags nil
+  "Popup ctags completions when this option is turn on."
   :type 'boolean
   :group 'acm-backend-ctags)
 

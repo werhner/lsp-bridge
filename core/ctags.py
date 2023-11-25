@@ -21,36 +21,13 @@ import os
 
 from core.utils import *
 
+from core.tags import tags
+
 DEFAULT_FILTER_CMD = '(not (or (and $extras ((string->regexp "(^|,) ?(anonymous|reference)(,|$)" :case-fold false) $extras)) (or (and $extras ((string->regexp "(^|,) ?(inputFile)(,|$)" :case-fold false) $extras)) (and $kind ((string->regexp "^(file|F)$" :case-fold false) $kind))) false))'
 
 DEFAULT_SORTER_CMD = '(<or> (if (and $name &name) (<> (length $name) (length &name)) 0) (if (and $name &name) (<> $name &name) 0))'
 
-class Ctags:    
-    def __init__(self) -> None:
-        self.current_cursor_offset = 0
-        self.lock = threading.RLock()
-
-    def run_cmd_in_path(self, cmd, filename, in_shell=False):
-        if os.path.isfile(filename):
-            cwd = os.path.dirname(filename)
-        else:
-            cwd = filename
-
-        result = subprocess.run(cmd, cwd=cwd, shell=in_shell, capture_output=True, text=True)
-
-        # Get the output as a string
-        output = ""
-        status = result.returncode
-        if status != 0:
-            logger.error(result.stderr)
-        else:
-            output = result.stdout
-
-        lines = output.split('\n')
-        lines = [l for l in lines if l != '']
-
-        return lines
-
+class Ctags(tags):
     def parse_tag_line(self, line):
         if line == '':
             return None
@@ -110,26 +87,8 @@ class Ctags:
 
         return candidate
 
-    def locate_dominating_file(self, file_or_dir, filename):
-        current_dir = os.path.abspath(file_or_dir)
-        
-        while True:
-            if os.path.exists(os.path.join(current_dir, filename)):
-                return os.path.join(current_dir, filename)
-            
-            if current_dir == os.path.dirname(current_dir):
-                break
-
-            current_dir = os.path.dirname(current_dir)
-            
-        return None
-
     def make_complete(self, symbol, filename, cursor_offset):
-        self.lock.acquire()
-        try:
-            self.current_cursor_offset = cursor_offset
-        finally:
-            self.lock.release()
+        self.update_cursor(cursor_offset)
 
         if not filename:
             return
@@ -145,15 +104,7 @@ class Ctags:
         tags = map(self.parse_tag_line, lines)
         candidates = map(self.make_ctags_acm_candidate, tags)
 
-        self.dispatch(list(candidates), cursor_offset)
-
-    def dispatch(self, candidates, cursor_offset):
-        self.lock.acquire()
-        try:
-            if self.current_cursor_offset == cursor_offset:
-                eval_in_emacs("lsp-bridge-search-backend--record-items", "ctags", candidates)
-        finally:
-            self.lock.release()
+        self.dispatch("ctags", list(candidates), cursor_offset)
 
     def readtags_get_cmd(self, tagsfile, name, match, case_fold, filter, sorter, action):
         extras = ("-Ene" +

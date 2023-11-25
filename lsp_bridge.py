@@ -47,6 +47,7 @@ from core.utils import *
 from core.handler import *
 from core.remote_file import RemoteFileClient, RemoteFileServer, save_ip
 from core.ctags import Ctags
+from core.gtags import Gtags
 
 def threaded(func):
     @wraps(func)
@@ -104,6 +105,10 @@ class LspBridge:
     def ctags_complete(self, symbol, filename, cursor_offset):
         self.ctags.make_complete(symbol, filename, cursor_offset)
 
+    @threaded
+    def gtags_complete(self, symbol, filename, cursor_offset):
+        self.gtags.make_complete(symbol, filename, cursor_offset)
+
     def init_search_backends(self):
         # Init tabnine.
         self.tabnine = TabNine()
@@ -121,6 +126,7 @@ class LspBridge:
         self.search_tailwind_keywords = SearchTailwindKeywords()
         self.search_paths = SearchPaths()
         self.ctags = Ctags()
+        self.gtags = Gtags()
 
         # Build EPC interfaces.
         handler_subclasses = list(map(lambda cls: cls.name, Handler.__subclasses__()))

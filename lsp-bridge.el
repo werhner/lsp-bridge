@@ -1487,6 +1487,17 @@ So we build this macro to restore postion after code format."
                                                   (1- (point))))
           (lsp-bridge-call-async "ctags_complete" current-word (buffer-file-name) (1- (point))))))
 
+    (when (and acm-enable-gtags
+               (lsp-bridge-process-live-p))
+      (unless (or (string-equal current-word "") (null current-word))
+        (if (lsp-bridge-is-remote-file)
+            (lsp-bridge-remote-send-func-request "gtags_complete"
+                                                 (list
+                                                  current-word
+                                                  (file-local-name (buffer-file-name))
+                                                  (1- (point))))
+          (lsp-bridge-call-async "gtags_complete" current-word (buffer-file-name) (1- (point))))))
+
     ;; Search sdcv dictionary.
     (when acm-enable-search-sdcv-words
       ;; Search words if current prefix is not empty.
