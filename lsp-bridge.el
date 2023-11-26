@@ -733,13 +733,16 @@ So we build this macro to restore postion after code format."
 
 (defun lsp-bridge-get-buffer-file-name-text ()
   ;; `buffer-file-name' may contain face property, we need use `substring-no-properties' remove those face from buffer name.
-  (substring-no-properties buffer-file-name))
+  (when (stringp buffer-file-name)
+    (substring-no-properties buffer-file-name)))
 
 (defun lsp-bridge-get-buffer-truename (&optional filename)
   (if (lsp-bridge-is-remote-file)
       lsp-bridge-remote-file-path
-    (file-truename (or filename 
-                       (lsp-bridge-get-buffer-file-name-text)))))
+    (let ((name (or filename
+                    (lsp-bridge-get-buffer-file-name-text))))
+      (when name
+        (file-truename name)))))
 
 (defun lsp-bridge-get-match-buffer-by-remote-file (host path)
   (cl-dolist (buffer (buffer-list))
@@ -2025,7 +2028,7 @@ Default is `bottom-right', you can choose other value: `top-left', `top-right', 
   ;; LSP server will confused those indent action and return wrong completion candidates.
   ;;
   ;; Example, when you enable `electric-indent-mode', when you type `std::', you will got wrong completion candidates from LSP server.
-  (electric-indent-mode -1)
+  (electric-indent-local-mode -1)
 
   ;; Don't enable lsp-bridge when current buffer is acm buffer.
   (unless (or (equal (buffer-name (current-buffer)) acm-buffer)
