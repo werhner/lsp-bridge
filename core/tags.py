@@ -35,7 +35,7 @@ class tags():
 
     def run_cmd_in_path(self, cmd, filename, in_shell=False):
         cwd = self.get_dir(filename)
-
+        
         result = subprocess.run(cmd, cwd=cwd, shell=in_shell, capture_output=True, text=True)
 
         # Get the output as a string

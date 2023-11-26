@@ -1718,7 +1718,7 @@ Off by default."
                                       (let* ((path (plist-get tag :ext-abspath))
                                              (line (plist-get tag :line))
                                              (column (plist-get tag :column))
-                                             (summary (plist-get tag :summary)))
+                                             (summary (propertize (xterm-color-filter-strip (plist-get tag :summary)))))
                                         (xref-make
                                          summary
                                          (xref-make-file-location path line column))))
@@ -1730,6 +1730,9 @@ Off by default."
 
 (defun lsp-bridge-gtags-find-ref (symbol filename)
   (lsp-bridge-call-async "gtags_find_ref" symbol filename))
+
+(defun lsp-bridge-ctags-find-def (symbol filename)
+  (lsp-bridge-call-async "ctags_find_def" symbol filename))
 
 (defun lsp-bridge-references--popup (references-content references-counter position)
   (if (> references-counter 0)

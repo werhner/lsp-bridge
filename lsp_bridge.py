@@ -106,6 +106,10 @@ class LspBridge:
         self.ctags.make_complete(symbol, filename, cursor_offset)
 
     @threaded
+    def ctags_find_def(self, symbol, filename):
+        self.ctags.find_definition(symbol, filename)
+
+    @threaded
     def gtags_complete(self, symbol, filename, cursor_offset):
         self.gtags.make_complete(symbol, filename, cursor_offset)
 

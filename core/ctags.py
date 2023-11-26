@@ -105,6 +105,34 @@ class Ctags(tags):
 
         self.dispatch("ctags", list(candidates), cursor_offset)
 
+    def find_definition(self, symbol, filepath):
+        if not filepath:
+            return
+
+        tagsfile = self.locate_dominating_file(filepath, "tags")
+        if not tagsfile:
+            return
+
+        dir_name = self.get_dir(tagsfile)
+        cmd = self.readtags_get_cmd(tagsfile, symbol, "exact", False, "", "", "")
+        lines = self.run_cmd_in_path(cmd, filepath)
+
+        def make_xref(tag):
+            path = tag.get("tagfile", "")
+            line = int(tag.get("line", "1"))
+            pattern = tag.get("tagaddress", "")[2:-2]
+            annotation = self.make_tag_annotation(tag)
+
+            return {"ext-abspath": os.path.join(dir_name, path),
+                    "line": line,
+                    "column": 0,
+                    "summary": "\033[95m({})\033[0m{}".format(annotation, pattern)}
+
+        tags = map(self.parse_tag_line, lines)
+        candidates = map(make_xref, tags)
+        #print(list(candidates))
+        eval_in_emacs("lsp-bridge-xref-callback", list(candidates))
+
     def readtags_get_cmd(self, tagsfile, name, match, case_fold, filter, sorter, action):
         extras = ("-Ene" +
                   ("" if match == "exact" else "p") +
