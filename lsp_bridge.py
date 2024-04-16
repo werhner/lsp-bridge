@@ -828,8 +828,16 @@ class LspBridge:
             log_time("Exit server {}".format(server_name))
             del LSP_SERVER_DICT[server_name]
 
+    def cleanup_client(self):
+        for client_id, client in self.client_dict.items():
+            try:
+                client.kill_lsp_bridge_process()
+            except AttributeError:
+                pass
+
     def cleanup(self):
         """Do some cleanup before exit python process."""
+        cleanup_client(self)
         close_epc_client()
 
     def start_test(self):

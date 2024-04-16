@@ -178,7 +178,8 @@ class RemoteFileClient(threading.Thread):
         _, stdout, stderr = self.ssh.exec_command(
             f"""
             nohup /bin/bash -l -c '
-            if ! pidof {remote_python_command} >/dev/null 2>&1; then
+            pid=$(ps aux | grep -v grep | grep lsp_bridge.py | cut -d " " -f2)
+            if [ "$pid" == "" ]; then
                 echo -e "Start lsp-bridge process as user $(whoami)" | tee >{remote_log}
                 {remote_python_command} {remote_python_file} >>{remote_log} 2>&1 &
                 if [ "$?" = "0" ]; then
@@ -190,6 +191,21 @@ class RemoteFileClient(threading.Thread):
         """
         )
         print(f"Remote process started at {self.ssh_host}")
+        print("stdout:" + stdout.read().decode())
+        print("stderr:" + stderr.read().decode())
+
+    def kill_lsp_bridge_process(self):
+        [remote_log] = get_emacs_vars(["lsp-bridge-remote-log"])
+        _, stdout, stderr = self.ssh.exec_command(
+            f"""
+            nohup /bin/bash -l -c '
+            pid=$(ps aux | grep -v grep | grep lsp_bridge.py | cut -d " " -f2)
+            if ! [ "$pid" == "" ]; then
+                kill $pid
+                echo -e "Kill lsp-bridge process successfully" | tee >>{remote_log}
+            fi'
+        """
+        )
         print("stdout:" + stdout.read().decode())
         print("stderr:" + stderr.read().decode())
 
