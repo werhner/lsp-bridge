@@ -829,7 +829,7 @@ class LspBridge:
             del LSP_SERVER_DICT[server_name]
 
     def cleanup_client(self):
-        for client_id, client in self.client_dict.items():
+        for client in self.client_dict.values():
             try:
                 client.kill_lsp_bridge_process()
             except AttributeError:
