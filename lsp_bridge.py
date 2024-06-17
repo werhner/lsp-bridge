@@ -935,6 +935,15 @@ class LspBridge:
             log_time("Exit server {}".format(server_name))
             del LSP_SERVER_DICT[server_name]
 
+    @threaded
+    def py_make_process_in_remote(self, server_host, cmd, stdout_pipe, stderr_pipe):
+        client_id = f"{server_host}:{REMOTE_FILE_SYNC_CHANNEL}"
+        if client_id in self.client_dict:
+            self.client_dict[client_id].make_process_in_remote(cmd, stdout_pipe, stderr_pipe)
+        else:
+            client = self.get_socket_client(server_host, REMOTE_FILE_SYNC_CHANNEL)
+            client.make_process_in_remote(cmd, stdout_pipe, stderr_pipe)
+        
     def close_client(self):
         for client in self.client_dict.values():
             if hasattr(client, "kill_lsp_bridge_process"):

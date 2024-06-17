@@ -223,6 +223,35 @@ class RemoteFileClient(threading.Thread):
         except:
             pass
 
+    def make_process_in_remote(self, cmd, stdout_pipe, stderr_pipe):
+        chan = self.ssh.get_transport().open_session()
+        chan.exec_command(cmd)
+        stdout = os.open(os.path.abspath(stdout_pipe), os.O_RDWR)
+        if stderr_pipe:
+            stderr = os.open(os.path.abspath(stderr_pipe), os.O_RDWR)
+        else:
+            stderr = os.open(os.path.abspath(stdout_pipe), os.O_RDWR)
+            
+        key = True
+        while key:
+            if chan.recv_ready():
+                output = chan.recv(1024)
+                log_time("output: %s" % output.decode("ascii"))
+                os.write(stdout, output)
+            if chan.recv_stderr_ready():
+                os.write(stderr, chan.recv_stderr(1024))
+            if chan.exit_status_ready():
+                output = chan.recv(1024)
+                log_time("output: %s" % output.decode("ascii"))
+                os.write(stdout, output)
+                os.write(stderr, chan.recv_stderr(1024))
+                log_time("remote exit status: %s" % chan.recv_exit_status())
+                key = False
+
+        os.close(stdout)
+        os.close(stderr)
+        chan.close()
+            
 
 class DockerFileClient(threading.Thread):
     def __init__(self, container_name, server_port, callback):
