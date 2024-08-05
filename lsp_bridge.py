@@ -56,6 +56,7 @@ from core.remote_file import (
     get_container_local_ip
 )
 from core.ctags import Ctags
+import core.linenote
 
 def threaded(func):
     @wraps(func)
@@ -913,6 +914,17 @@ class LspBridge:
     def ctags_find_def(self, symbol, filename):
         self.ctags.find_definition(symbol, filename)
 
+    def linenote_create(self, project, filename, start, end):
+        core.linenote.create_a_linenote(project, filename,
+                                        start[1], start[3],
+                                        end[1], end[3])
+
+    def linenote_open_file(self, project, filename):
+        core.linenote.open_a_file(project, filename)
+
+    def linenote_close_file(self, filename):
+        core.linenote.close_a_file(filename)
+        
     def copilot_complete(self, position, editor_mode, file_path, relative_path, tab_size, text, insert_spaces):
         self.copilot.complete(position, editor_mode, file_path, relative_path, tab_size, text, insert_spaces)
 
