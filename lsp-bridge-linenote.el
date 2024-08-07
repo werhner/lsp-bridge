@@ -11,22 +11,46 @@
   (add-hook 'flymake-diagnostic-functions #'flymake-linenote nil t)
   (add-hook 'lsp-bridge-linenote-update-hook #'flymake-start nil t)
 
-  (lsp-bridge-call-async "linenote_open_file" (project-root (my-project-root))
-                         (file-local-name (buffer-file-name))))
+  (let ((project (file-local-name (project-root (my-project-root))))
+        (filename (file-local-name (buffer-file-name))))
+    (if (lsp-bridge-is-remote-file)
+        (lsp-bridge-remote-send-func-request "linenote_open_file"
+                                             (list project
+                                                   filename))
+      (lsp-bridge-call-async "linenote_open_file"
+                             project
+                             filename))))
 
 (defun lsp-bridge-linenote-close-file-hook ()
   (lsp-bridge-call-async "linenote_close_file" (file-local-name (buffer-file-name))))
 
 (defun lsp-bridge-linenote-create ()
   (interactive)
-  (lsp-bridge-call-async "linenote_create" (project-root (my-project-root)) (file-local-name (buffer-file-name))
-                         (lsp-bridge--point-position (if (use-region-p)
-                                                         (region-beginning)
-                                                       (line-beginning-position)))
-                         (lsp-bridge--point-position (if (use-region-p)
-                                                         (region-end)
-                                                       (point)))
-                         ))
+
+  (let ((project (file-local-name (project-root (my-project-root))))
+        (filename (file-local-name (buffer-file-name)))
+        (start (lsp-bridge--point-position (if (use-region-p)
+                                               (region-beginning)
+                                             (line-beginning-position))))
+        (end (lsp-bridge--point-position (if (use-region-p)
+                                             (region-end)
+                                           (point)))))
+    (if (lsp-bridge-is-remote-file)
+        (lsp-bridge-remote-send-func-request "linenote_create"
+                                             (list project
+                                                   filename
+                                                   (plist-get start :line)
+                                                   (plist-get start :character)
+                                                   (plist-get end :line)
+                                                   (plist-get end :character)))
+      (lsp-bridge-call-async "linenote_create"
+                             project
+                             filename
+                             (plist-get start :line)
+                             (plist-get start :character)
+                             (plist-get end :line)
+                             (plist-get end :character)
+                             ))))
 
 (defun lsp-bridge-linenote-delete ()
   (interactive)

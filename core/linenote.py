@@ -2,7 +2,7 @@ import os
 import re
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from core.utils import eval_in_emacs, get_lsp_file_host
+from core.utils import eval_in_emacs, get_lsp_file_host, get_remote_connection_info
 import logging
 import time
 
@@ -22,11 +22,11 @@ def parse_one_note(linenote: str):
         first_line = file.readline().strip()
 
     logging.error(linenote)
-    return {"range": {"start": {"line": start_line, "character": start_char},
-                      "end": {"line": end_line, "character": end_char}},
-            "message": first_line,
-            "severity": 4,
-            "server-name": "linenote"
+    return {'range': {'start': {'line': start_line, 'character': start_char},
+                      'end': {'line': end_line, 'character': end_char}},
+            'message': f"{first_line}",
+            'severity': 4,
+            'server-name': 'linenote'
             }
     
 def create_a_linenote(project: str, filename: str, start_line: int, start_char: int, end_line: int, end_char: int):
@@ -46,7 +46,7 @@ def create_a_linenote(project: str, filename: str, start_line: int, start_char: 
 
     # with open(linenote, 'w') as _file:
     #     pass
-    eval_in_emacs("find-file", linenote)
+    eval_in_emacs("find-file", get_remote_connection_info() + linenote)
 
 def delete_a_linenote(project: str, filename: str, start_line: int, start_char: int, end_line: int, end_char: int):
     project = os.path.expanduser(project)

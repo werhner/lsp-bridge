@@ -914,10 +914,10 @@ class LspBridge:
     def ctags_find_def(self, symbol, filename):
         self.ctags.find_definition(symbol, filename)
 
-    def linenote_create(self, project, filename, start, end):
+    def linenote_create(self, project, filename, start_line, start_char, end_line, end_char):
         core.linenote.create_a_linenote(project, filename,
-                                        start[1], start[3],
-                                        end[1], end[3])
+                                        start_line, start_char,
+                                        end_line, end_char)
 
     def linenote_open_file(self, project, filename):
         core.linenote.open_a_file(project, filename)

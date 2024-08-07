@@ -436,7 +436,7 @@ def is_remote_path(filepath):
     return filepath.startswith("/ssh:") or filepath.startswith("/docker:")
 
 def eval_sexp_in_emacs(sexp):
-    epc_client.call("eval-in-emacs", [sexp])
+    epc_client.call("eval-in-emacs", sexp)
 
 def string_to_base64(text):
     import base64

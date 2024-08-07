@@ -1,5 +1,6 @@
 {
 "venvPath": ".",
-"venv": "venv"
-"typeCheckingMode": "off"
+"venv": "venv",
+"typeCheckingMode": "standard",
+"reportUnknownVariableType": "none"
 }
