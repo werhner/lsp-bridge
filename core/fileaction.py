@@ -66,7 +66,7 @@ class FileAction:
         self.external_file_link = external_file_link
         self.filepath = filepath
 
-        self.last_change_cursor_time = -1.0
+        self.last_cursor_position = -1.0
         self.last_change_file_time = -1.0
 
         self.request_dict = {}
@@ -135,7 +135,7 @@ class FileAction:
     @property
     def last_change(self) -> Tuple[float, float]:
         """Return the last change information as a tuple."""
-        return self.last_change_file_time, self.last_change_cursor_time
+        return self.last_change_file_time, self.last_cursor_position
 
     def read_file(self):
         """Read file content."""
@@ -209,6 +209,7 @@ class FileAction:
                 self.completion_block_kind_list = list(map(lambda x: x.lower(), self.completion_block_kind_list))
 
         delay = 0 if is_running_in_server() else 0.1
+        self.last_cursor_position = position
         self.try_completion_timer = threading.Timer(delay, lambda : self.try_completion(position, before_char, prefix, self.version))
         self.try_completion_timer.start()
 
@@ -265,7 +266,7 @@ class FileAction:
 
     def change_cursor(self, position):
         # Record change cursor time.
-        self.last_change_cursor_time = time.time()
+        self.last_cursor_position = position
 
     def get_diagnostics_count(self):
         return sum(len(diags) for diags in self.diagnostics.values())
