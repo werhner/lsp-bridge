@@ -108,6 +108,7 @@ class LspBridge:
         self.lsp_client_dict = {}
         self.host_names = {}
         self.host_ip_dict = {}
+        self.remote_alias_to_hostname = {}
 
         # Init event loop.
         self.event_queue = queue.Queue()
@@ -336,13 +337,16 @@ class LspBridge:
                 client = self.get_socket_client(server_host, port)
                 try:
                     client.send_message(data["message"])
-                except SendMessageException as e:
+                except Exception as e:
                     # lsp-bridge process might has been restarted, making the orignal socket no longer valid.
                     logger.exception("Connection %s is broken, message %s, error %s", f"{server_host}:{port}", data["message"], e)
                     # remove all the clients for server_host from client_dict
                     # client will be created again when get_socket_client is called
                     for client_id in [key for key in self.client_dict.keys() if key.startswith(server_host + ":")]:
                         self.client_dict.pop(client_id, None)
+
+                    self.remote_alias_to_hostname.pop(self.host_names[server_host]["alias"])
+                    self.host_names.pop(server_host, None)
 
                     message_emacs(f"try to recreate connection to {server_host}:{port}")
                     try:
@@ -354,8 +358,6 @@ class LspBridge:
                         # connection restored, try to send out the message
                         client.send_message(data["message"])
                         eval_in_emacs('lsp-bridge-remote-reconnect', server_host, False)
-                except Exception as e:
-                    logger.exception(e)
                 finally:
                     queue.task_done()
         except:
@@ -400,12 +402,13 @@ class LspBridge:
         #   /docker:user@container:/path/to/file
         # see https://www.gnu.org/software/tramp/#File-name-syntax
         tramp_method_prefix = tramp_file_name.rsplit(":", 1)[0]
+        alias = None
 
         if tramp_method_prefix.startswith("/ssh"):
             alias = None
             # arguments are passed from emacs using standard TRAMP functions tramp-file-name-<field>
-            if server_host in self.host_names:
-                server_host = self.host_names[server_host]['hostname']
+            if server_host in self.remote_alias_to_hostname:
+                server_host = self.remote_alias_to_hostname[server_host]
                 ssh_conf = self.host_names[server_host]
             elif is_valid_ip(server_host):
                 ssh_conf = {'hostname' : server_host}
@@ -418,6 +421,7 @@ class LspBridge:
                 ssh_conf = ssh_config.lookup(alias)
 
                 server_host = ssh_conf.get('hostname', server_host)
+                self.remote_alias_to_hostname[alias] = server_host
 
             if not is_valid_ip(server_host):
                 if server_host in self.host_ip_dict:
@@ -443,6 +447,7 @@ class LspBridge:
             if ssh_port:
                 ssh_conf['port'] = ssh_port
             self.host_names[server_host] = ssh_conf
+            self.host_names[server_host]["alias"] = alias
             if alias:
                 self.host_names[alias] = ssh_conf
 
