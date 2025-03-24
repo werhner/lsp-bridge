@@ -763,7 +763,8 @@ class LspBridge:
             os.path.basename(project_path.rstrip(os.path.sep))))
 
     def load_single_lang_server(self, project_path, filepath):
-        single_lang_server = get_emacs_func_result("get-single-lang-server", project_path, filepath)
+        single_lang_server = get_emacs_func_result("get-single-lang-server", project_path,
+                                                   get_remote_connection_info() + filepath)
 
         if not single_lang_server:
             self.turn_off(filepath, "ERROR: can't find the corresponding server for {}".format(filepath))
