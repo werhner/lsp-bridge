@@ -587,6 +587,7 @@ class FileElispServer(RemoteFileServer):
 class FileCommandServer(RemoteFileServer):
     def __init__(self, host, port, lsp_bridge):
         self.lsp_bridge = lsp_bridge
+        self.remote_client_host = None  # Real host from client message
         super().__init__(host, port)
 
     def handle_client(self):
@@ -603,6 +604,10 @@ class FileCommandServer(RemoteFileServer):
         self.lsp_bridge.close_all_files()
 
     def handle_message(self, message):
+        # Record the real remote client host from message
+        if "server" in message and message["server"]:
+            self.remote_client_host = message["server"]
+
         if message["command"] == "lsp_request":
             # Call LSP request.
             self.lsp_bridge.event_queue.put({

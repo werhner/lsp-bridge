@@ -118,6 +118,9 @@ def set_lsp_bridge_server(bridge):
 def get_lsp_file_host():
     global lsp_bridge_server
     if lsp_bridge_server and lsp_bridge_server.file_command_server:
+        # Prefer remote_client_host from message, fallback to socket client_address
+        if lsp_bridge_server.file_command_server.remote_client_host:
+            return lsp_bridge_server.file_command_server.remote_client_host
         return lsp_bridge_server.file_command_server.client_address[0]
     else:
         return ""
