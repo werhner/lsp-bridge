@@ -21,13 +21,22 @@
 
 import threading
 import os
-import glob
+import subprocess
 import json
 import socket
 import traceback
 import time
 from core.utils import *
 from contextlib import contextmanager
+
+
+def is_ipv6(address):
+    """Check if address is IPv6"""
+    try:
+        socket.inet_pton(socket.AF_INET6, address)
+        return True
+    except socket.error:
+        return False
 
 
 class SendMessageException(Exception):
@@ -39,8 +48,6 @@ class ContainerConnectionException(Exception):
 
 
 class RemoteFileClient(threading.Thread):
-    remote_password_dict = {}
-
     def __init__(self, ssh_conf, server_port, callback):
         threading.Thread.__init__(self)
 
@@ -48,182 +55,248 @@ class RemoteFileClient(threading.Thread):
         self.ssh_host = ssh_conf['hostname']
         self.ssh_user = ssh_conf.get('user', "root")
         self.ssh_port = ssh_conf.get('port', 22)
+        self.ssh_alias = ssh_conf.get('alias')  # SSH config 中的 Host 别名
         self.server_port = server_port
         self.callback = callback
-        [self.remote_python_command, self.remote_python_file, self.remote_log] = get_emacs_vars(["lsp-bridge-remote-python-command", "lsp-bridge-remote-python-file", "lsp-bridge-remote-log"])
 
         [self.user_ssh_private_key,
          self.user_ssh_agent] = get_emacs_vars(["lsp-bridge-user-ssh-private-key",
                                                 "lsp-bridge-user-ssh-agent"])
 
-        self.ssh = self.connect_ssh(
-            ssh_conf.get('gssapiauthentication', 'no') in ('yes'),
-            ssh_conf.get('proxycommand', None)
-        )
-        # after successful login, don't create a channel yet
-        # caller can use client ssh to execute command on remote server
-        # ande then call create_channel() to create the channel
-        self.chan = None
+        # 新增属性
+        self.local_port = None
+        self.ssh_process = None
+        self.sock = None
+        self.lock = threading.Lock()
 
-    def ssh_private_key(self):
-        """Retrieves the path to the SSH private key file.
+        # 获取配置
+        [self.remote_python_command, self.remote_python_file, self.remote_log] = \
+            get_emacs_vars(["lsp-bridge-remote-python-command",
+                           "lsp-bridge-remote-python-file",
+                           "lsp-bridge-remote-log"])
+        [self.remote_heartbeat_interval] = get_emacs_vars(["lsp-bridge-remote-heartbeat-interval"])
 
-        The user can specify the SSH private key path by setting the
-        `lsp-bridge-user-ssh-private-key` in emacs.
+    def _find_free_port(self):
+        """获取一个可用的本地端口"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
 
-        If this configuration is not set, the function defaults to using the
-        first found public key to determine the private key file in the `.ssh`
-        directory.
-        """
-        if not self.user_ssh_private_key:
-            ssh_dir = "~/.ssh"
-            ssh_dir = os.path.expanduser(ssh_dir)
-            pub_keys = glob.glob(os.path.join(ssh_dir, "*.pub"))
-            default_pub_key = pub_keys[0]
-            private_key = default_pub_key[: -len(".pub")]
+    def _build_ssh_command(self, extra_args=None):
+        """构建基础 ssh 命令"""
+        cmd = ['ssh']
+
+        # 额外参数
+        if extra_args:
+            cmd.extend(extra_args)
+
+        # 如果有 alias，直接使用 alias（会自动读取 ~/.ssh/config 中的配置）
+        # 否则使用 user@host 格式
+        if self.ssh_alias:
+            cmd.append(self.ssh_alias)
         else:
-            private_key = os.path.expanduser(self.user_ssh_private_key)
-        return private_key
+            # 端口（只有在没有 alias 时才需要手动指定）
+            if self.ssh_port != 22:
+                cmd.extend(['-p', str(self.ssh_port)])
+            cmd.append(f'{self.ssh_user}@{self.ssh_host}')
 
-    def connect_ssh(self, use_gssapi, proxy_command):
-        """Connect to remote ssh_host
-
-        :raises: :class:`paramiko.AuthenticationException`: if all authentication method failed
-        """
-        import paramiko
-
-        ssh = paramiko.SSHClient()
-        ssh.load_system_host_keys()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        proxy = None
-        if proxy_command:
-            proxy = paramiko.ProxyCommand(proxy_command)
-
-        try:
-            if use_gssapi:
-                ssh.connect(self.ssh_host, port=self.ssh_port, username=self.ssh_user, gss_auth=True, gss_kex=True, sock=proxy)
-            else:
-                # Login server with ssh private key.
-                # Don't specify key_filename with ssh-agent (allow_agent is default to True)
-                ssh_private_key = self.ssh_private_key() if not self.user_ssh_agent else None
-                # look_for_keys defaults to True
-                # when user specify the SSH private key path
-                # disable searching for discoverable private key files in ~/.ssh/
-                look_for_keys = not self.user_ssh_private_key
-                ssh.connect(self.ssh_host, port=self.ssh_port, username=self.ssh_user, key_filename=ssh_private_key, look_for_keys=look_for_keys, sock=proxy)
-        except:
-            print(traceback.format_exc())
-
-            # Try login server with password if private key is not available.
-            try:
-                # running `get-ssh-password` on macOS will raise error of 'The macOS Keychain auth-source backend doesn’t support creation yet'
-                password = RemoteFileClient.remote_password_dict[self.ssh_host] if self.ssh_host in RemoteFileClient.remote_password_dict else get_ssh_password(self.ssh_user, self.ssh_host, self.ssh_port)
-
-                ssh.connect(self.ssh_host, port=self.ssh_port, username=self.ssh_user, password=password)
-
-                # Only remeber server's login password after login server successfully.
-                # Password only record in memory for session login, not save in file.
-                RemoteFileClient.remote_password_dict[self.ssh_host] = password
-            except:
-                print(traceback.format_exc())
-                raise paramiko.AuthenticationException()
-
-        return ssh
+        return cmd
 
     def create_channel(self):
-        """Create channel to lsp-bridge process running in server
+        """启动 SSH 端口转发并连接"""
+        self.local_port = self._find_free_port()
 
-        :raises: :class:`paramiko.ChannelException`: if server lsp-bridge process doesn't exisit
-        """
-        self.chan = self.ssh.get_transport().open_channel(
-            "direct-tcpip", (self.ssh_host, self.server_port), ("0.0.0.0", 0)
+        # 构建端口转发命令
+        # 使用 localhost 而不是 127.0.0.1，以便同时支持 IPv4 和 IPv6
+        forward_spec = f'{self.local_port}:localhost:{self.server_port}'
+        extra_args = [
+            '-N',  # 不执行远程命令
+            '-o', 'ExitOnForwardFailure=yes',  # 端口转发失败时退出
+            '-o', 'ControlMaster=no',  # 禁用连接复用
+            '-o', 'ControlPath=none',  # 完全禁用控制套接字
+            '-L', forward_spec
+        ]
+
+        # 心跳设置
+        if self.remote_heartbeat_interval and self.remote_heartbeat_interval != 0:
+            extra_args.extend(['-o', f'ServerAliveInterval={self.remote_heartbeat_interval}'])
+
+        cmd = self._build_ssh_command(extra_args)
+
+        log_time(f"SSH command: {' '.join(cmd)}")
+
+        # 启动 SSH 进程
+        self.ssh_process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE
         )
-        if self.chan:
-            [self.remote_heartbeat_interval] = get_emacs_vars(["lsp-bridge-remote-heartbeat-interval"])
-            if self.remote_heartbeat_interval and self.remote_heartbeat_interval != 0:
-                threading.Thread(target=self.heartbeat).start()
 
-    def heartbeat(self):
-        try:
-            while True:
-                self.chan.sendall("ping\n".encode("utf-8"))
-                log_time_debug(f"Ping server: {self.ssh_host}, port: {self.server_port}")
-                time.sleep(self.remote_heartbeat_interval)
-        except Exception as e:
-            logger.exception(e)
+        log_time(f"SSH process started, pid: {self.ssh_process.pid}")
+
+        # 等待端口转发就绪并连接
+        self._wait_and_connect()
+
+    def _wait_and_connect(self, max_retries=300, delay=0.2):
+        """等待端口转发就绪并建立 socket 连接"""
+        log_time(f"Waiting for SSH tunnel on port {self.local_port}...")
+
+        for i in range(max_retries):
+            # 检查 SSH 进程是否已退出（可能是认证失败等）
+            if self.ssh_process.poll() is not None:
+                stderr = self.ssh_process.stderr.read().decode()
+                log_time(f"SSH process exited with code {self.ssh_process.returncode}, stderr: {stderr}")
+                raise Exception(f"SSH process exited: {stderr}")
+
+            try:
+                self.sock = socket.create_connection(
+                    ('127.0.0.1', self.local_port),
+                    timeout=1
+                )
+                # 连接成功后，验证远程服务是否可用
+                # 设置短超时来检测连接是否立即被断开
+                self.sock.settimeout(0.5)
+                try:
+                    # 尝试接收数据，如果远程服务不存在，连接会被断开
+                    data = self.sock.recv(1, socket.MSG_PEEK)
+                    # 如果收到空数据，说明连接被关闭
+                    if not data:
+                        raise Exception("Remote service not available")
+                except socket.timeout:
+                    # 超时是正常的，说明连接有效但没有数据
+                    pass
+                except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                    # 连接被重置，说明远程服务不存在
+                    self.sock.close()
+                    raise Exception(f"Remote service not available: {e}")
+
+                # 连接验证成功，移除超时设置
+                self.sock.settimeout(None)
+                log_time(f"Connected to SSH tunnel on port {self.local_port}")
+                return
+            except (socket.error, ConnectionRefusedError) as e:
+                if i % 10 == 0:
+                    log_time(f"Retry {i}/{max_retries}: waiting for tunnel... ({e})")
+                time.sleep(delay)
+
+        # 超时后检查 SSH 进程状态
+        log_time(f"Failed to connect to SSH tunnel after {max_retries} retries")
+        if self.ssh_process.poll() is None:
+            # SSH 进程还在运行，尝试读取 stderr
+            log_time(f"SSH process still running (pid: {self.ssh_process.pid}), trying to get stderr...")
+            self.ssh_process.terminate()
+            try:
+                self.ssh_process.wait(timeout=2)
+            except:
+                self.ssh_process.kill()
+            stderr = self.ssh_process.stderr.read().decode()
+            log_time(f"SSH stderr: {stderr}")
+        raise Exception(f"Failed to connect to SSH tunnel after {max_retries} retries")
 
     def send_message(self, message):
-        """Send message via the channel
-
-        :raises: :class:`SendMessageException`: if channel is invalid
-        """
+        """发送消息"""
         try:
             data = json.dumps(message)
-            self.chan.sendall(f"{data}\n".encode("utf-8"))
+            with self.lock:
+                self.sock.sendall(f"{data}\n".encode("utf-8"))
         except socket.error as e:
             raise SendMessageException() from e
         else:
-            log_time_debug(f"Sended to server {self.ssh_host} port {self.server_port}: {message}")
+            log_time_debug(f"Sent to server {self.ssh_host} port {self.server_port}: {message}")
 
     def run(self):
-        chan_file = self.chan.makefile("r")
-        while True:
-            data = chan_file.readline().strip()
-            if not data:
-                break
+        """接收消息循环"""
+        try:
+            sock_file = self.sock.makefile("r")
+            while True:
+                data = sock_file.readline().strip()
+                if not data:
+                    break
 
-            message = parse_json_content(data)
-            log_time_debug(f"Received from server {self.ssh_host} port {self.server_port}: {message}")
-            self.callback(message)
-        self.chan.close()
+                message = parse_json_content(data)
+                # 替换 host 为实际的远程服务器地址，而不是 SSH 隧道的本地地址
+                message["host"] = self.ssh_host
+                log_time_debug(f"Received from server {self.ssh_host} port {self.server_port}: {message}")
+                self.callback(message)
+        finally:
+            self.close()
+
+    def close(self):
+        """关闭连接"""
+        if self.sock:
+            try:
+                self.sock.close()
+            except:
+                pass
+        if self.ssh_process:
+            try:
+                self.ssh_process.terminate()
+                self.ssh_process.wait(timeout=5)
+            except:
+                self.ssh_process.kill()
+
+    def _run_ssh_command(self, remote_cmd):
+        """执行远程 SSH 命令"""
+        cmd = self._build_ssh_command()
+        cmd.append(remote_cmd)
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+        return result
 
     def start_lsp_bridge_process(self):
+        """启动远程 lsp-bridge 进程"""
         remote_python_command = self.remote_python_command
         remote_python_file = self.remote_python_file
         remote_log = self.remote_log
 
         # use -l option to bash as a login shell, ensuring that login scripts (like ~/.bash_profile) are read and executed.
         # This is useful for lsp-bridge to use environment settings to correctly find out language server command
-        _, stdout, stderr = self.ssh.exec_command(
-            f"""
-            nohup /bin/bash -l -c '
-            pid=$(pgrep -f '\\''lsp_bridge.py$'\\'')
-            if [ "$pid" == "" ]; then
-                echo -e "Start lsp-bridge process as user $(whoami)" | tee >{remote_log}
-                {remote_python_command} {remote_python_file} >>{remote_log} 2>&1 &
-                if [ "$?" = "0" ]; then
-                    echo -e "Start lsp-bridge successfully" | tee >>{remote_log}
-                else
-                    echo -e "Start lsp-bridge failed" | tee >>{remote_log}
-                fi
-            fi'
+        remote_cmd = f"""
+        /bin/bash -l -c '
+        pid=$(pgrep -f "lsp_bridge.py$")
+        if [ "$pid" == "" ]; then
+            echo -e "Start lsp-bridge process as user $(whoami)" | tee {remote_log}
+            nohup {remote_python_command} {remote_python_file} >>{remote_log} 2>&1 &
+            sleep 1
+            if pgrep -f "lsp_bridge.py$" > /dev/null; then
+                echo -e "Start lsp-bridge successfully" | tee -a {remote_log}
+            else
+                echo -e "Start lsp-bridge failed" | tee -a {remote_log}
+            fi
+        else
+            echo "lsp-bridge already running with pid $pid"
+        fi'
         """
-        )
-        print(f"Remote process started at {self.ssh_host}")
-        print("stdout:" + stdout.read().decode())
-        print("stderr:" + stderr.read().decode())
+
+        result = self._run_ssh_command(remote_cmd)
+        log_time(f"Remote process started at {self.ssh_host}, stdout: {result.stdout}, stderr: {result.stderr}")
 
     def kill_lsp_bridge_process(self):
+        """停止远程 lsp-bridge 进程"""
         remote_log = self.remote_log
 
+        remote_cmd = f"""
+        nohup /bin/bash -l -c '
+        pid=$(pgrep -f "lsp_bridge.py$")
+        echo "try kill $pid" | tee >> {remote_log}
+        if ! [ "$pid" == "" ]; then
+            echo -e "kill lsp-bridge process as user $(whoami)" | tee >>{remote_log}
+            kill $pid
+            if [ "$?" = "0" ]; then
+                echo -e "Kill lsp-bridge successfully" | tee >>{remote_log}
+            else
+                echo -e "Kill lsp-bridge failed" | tee >>{remote_log}
+            fi
+        fi'
+        """
+
         try:
-            self.ssh.exec_command(
-                f"""
-                nohup /bin/bash -l -c '
-                pid=$(pgrep -f '\\''lsp_bridge.py$'\\'')
-                echo "try kill $pid" | tee >> {remote_log}
-                if ! [ "$pid" == "" ]; then
-                    echo -e "kill lsp-bridge process as user $(whoami)" | tee >>{remote_log}
-                    kill $pid
-                    if [ "$?" = "0" ]; then
-                        echo -e "Kill lsp-bridge successfully" | tee >>{remote_log}
-                    else
-                        echo -e "Kill lsp-bridge failed" | tee >>{remote_log}
-                    fi
-                fi'
-            """
-            )
+            self._run_ssh_command(remote_cmd)
         except:
             pass
 
@@ -246,9 +319,8 @@ class DockerFileClient(threading.Thread):
         """
         with self.lock:
             try:
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                # connect to local host
-                self.sock.connect(("127.0.0.1", self.server_port))
+                # Use create_connection to support both IPv4 and IPv6
+                self.sock = socket.create_connection(("127.0.0.1", self.server_port))
             except Exception as e:
                 raise ContainerConnectionException(e)
 
@@ -298,7 +370,8 @@ class RemoteFileServer:
         # Init.
         self.host = host
         self.port = port
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        family = socket.AF_INET6 if is_ipv6(host) else socket.AF_INET
+        self.server = socket.socket(family, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind((self.host, self.port))
         self.server.listen(5)
@@ -468,6 +541,9 @@ class FileElispServer(RemoteFileServer):
     def __init__(self, host, port, lsp_bridge):
         self.lsp_bridge = lsp_bridge
         self.rpcs = {}
+        # Set file_elisp_server BEFORE super().__init__() starts event_loop.
+        # This ensures get_emacs_vars() can use RPC when handle_client() runs.
+        lsp_bridge.file_elisp_server = self
         super().__init__(host, port)
 
     def handle_client(self):

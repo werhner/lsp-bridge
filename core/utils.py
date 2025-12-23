@@ -456,21 +456,30 @@ def cmp(x, y):
         return 0
 
 def is_valid_ip(ip):
-    m = re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", ip)
-    return bool(m) and all(map(lambda n: 0 <= int(n) <= 255, m.groups()))
+    import ipaddress
+    try:
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
 
 def is_valid_ip_path(ssh_path):
-    """Check if SSH-PATH is a valid ssh path."""
-    pattern = r"^/?(?:([a-z_][a-z0-9_\.-]*)@)?((?:[0-9]{1,3}\.){3}[0-9]{1,3})(?::(\d+))?:~?(.*)$"
+    """Check if SSH-PATH is a valid ssh path (supports IPv4 and IPv6)."""
+    # IPv4: user@192.168.1.1:port:/path or 192.168.1.1:/path
+    # IPv6: user@[fd00::1]:port:/path or [fd00::1]:/path
+    pattern = r"^/?(?:([a-z_][a-z0-9_\.-]*)@)?(?:((?:[0-9]{1,3}\.){3}[0-9]{1,3})|\[([0-9a-fA-F:]+)\])(?::(\d+))?:~?(.*)$"
     match = re.match(pattern, ssh_path)
     return match is not None
 
 def split_ssh_path(ssh_path):
-    """Split SSH-PATH into username, host, port and path."""
-    pattern = r"^/?((?:([a-z_][a-z0-9_\.-]*)@)?((?:[0-9]{1,3}\.){3}[0-9]{1,3})(?::(\d+))?:?)(.*)$"
+    """Split SSH-PATH into username, host, port and path (supports IPv4 and IPv6)."""
+    # IPv4: user@192.168.1.1:port:/path
+    # IPv6: user@[fd00::1]:port:/path
+    pattern = r"^/?((?:([a-z_][a-z0-9_\.-]*)@)?(?:((?:[0-9]{1,3}\.){3}[0-9]{1,3})|\[([0-9a-fA-F:]+)\])(?::(\d+))?:?)(.*)$"
     match = re.match(pattern, ssh_path)
     if match:
-        remote_info, username, host, port, path = match.groups()
+        remote_info, username, ipv4_host, ipv6_host, port, path = match.groups()
+        host = ipv4_host or ipv6_host
         ssh_conf = {'hostname' : host}
         if username:
             ssh_conf['user'] = username

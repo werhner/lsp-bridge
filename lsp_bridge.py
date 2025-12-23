@@ -9,7 +9,6 @@
 #   "sexpdata",
 #   "six",
 #   "setuptools",
-#   "paramiko",
 #   "rapidfuzz",
 #   "watchdog",
 # ]
@@ -223,18 +222,57 @@ class LspBridge:
         print("* Running lsp-bridge on remote server. "
               "Access files with 'lsp-bridge-open-remote-file' or 'find-file /docker:...'")
 
+        # IMPORTANT: Set lsp_bridge_server BEFORE creating servers to avoid race condition.
+        # When FileElispServer starts, its event_loop immediately begins accepting connections.
+        # If a client connects quickly (especially IPv6 localhost ::1), handle_client() may run
+        # before set_lsp_bridge_server() is called. This causes init_search_backends() to fail
+        # because get_emacs_vars() would try to use uninitialized epc_client instead of RPC.
+        set_lsp_bridge_server(self)
+
         # Build loop for remote files management.
-        self.file_server = FileSyncServer("0.0.0.0", REMOTE_FILE_SYNC_CHANNEL)
+        # Use :: to support both IPv4 and IPv6 (dual-stack)
+        self.file_server = FileSyncServer("::", REMOTE_FILE_SYNC_CHANNEL)
 
         # Build loop for call remote command from local Emacs.
         # Start waiting for init_search_backends_complete_event
-        self.file_command_server = FileCommandServer("0.0.0.0", REMOTE_FILE_COMMAND_CHANNEL, self)
+        self.file_command_server = FileCommandServer("::", REMOTE_FILE_COMMAND_CHANNEL, self)
 
         # Build loop for call local Emacs function from server.
         # Signal that init_search_backends_complete_event is done
-        self.file_elisp_server = FileElispServer("0.0.0.0", REMOTE_FILE_ELISP_CHANNEL, self)
+        self.file_elisp_server = FileElispServer("::", REMOTE_FILE_ELISP_CHANNEL, self)
 
-        set_lsp_bridge_server(self)
+    def _parse_ssh_config(self, host):
+        """Parse SSH config for a host using `ssh -G` command.
+
+        Returns a dict with hostname, user, port, etc.
+        """
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ['ssh', '-G', host],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                return {'hostname': host}
+
+            config = {}
+            for line in result.stdout.splitlines():
+                if ' ' in line:
+                    key, value = line.split(' ', 1)
+                    config[key.lower()] = value
+
+            # Convert port to int if present
+            if 'port' in config:
+                try:
+                    config['port'] = int(config['port'])
+                except ValueError:
+                    pass
+
+            return config
+        except Exception:
+            return {'hostname': host}
 
     # Functions for communication between local and remote server
     def get_socket_client(self, server_host, server_port, is_retry=False):
@@ -266,8 +304,6 @@ class LspBridge:
         if client_id in self.client_dict:
             return self.client_dict[client_id]
 
-        import paramiko
-
         ssh_conf = self.host_names[server_host]
         try:
             client = RemoteFileClient(
@@ -275,17 +311,18 @@ class LspBridge:
                 server_port,
                 lambda message: self.receive_remote_message(message, server_port),
             )
-        except paramiko.AuthenticationException:
-            # cloud not login server
-            message_emacs(f"login {ssh_conf} failed, please check *lsp-bridge*")
+        except Exception as e:
+            # could not login server
+            message_emacs(f"login {ssh_conf} failed: {e}, please check *lsp-bridge*")
             return None
 
         try:
             client.create_channel()
-        except paramiko.ChannelException:
-            # Channel Exception indicates that we clould not established channel
+        except Exception as e:
+            # Channel Exception indicates that we could not established channel
             # the remote process may not exist, try to start the process
             if is_retry:
+                message_emacs(f"create channel to {server_host} failed: {e}")
                 return None
 
             [remote_start_automatically] = get_emacs_vars(["lsp-bridge-remote-start-automatically"])
@@ -413,12 +450,9 @@ class LspBridge:
             elif is_valid_ip(server_host):
                 ssh_conf = {'hostname' : server_host}
             else:
-                import paramiko
                 alias = server_host
-                ssh_config = paramiko.SSHConfig()
-                with open(os.path.expanduser('~/.ssh/config')) as f:
-                    ssh_config.parse(f)
-                ssh_conf = ssh_config.lookup(alias)
+                # Use `ssh -G` to get SSH config, which is more reliable than parsing config file
+                ssh_conf = self._parse_ssh_config(alias)
 
                 server_host = ssh_conf.get('hostname', server_host)
                 self.remote_alias_to_hostname[alias] = server_host
@@ -656,12 +690,16 @@ class LspBridge:
         host = message["host"]
 
         # Read elisp code from local Emacs, and sendback to remote server.
-        if message["command"] == "get_emacs_func_result":
-            result = get_emacs_func_result(message["method"], *message["args"])
-        elif message["command"] == "get_emacs_vars":
-            result = get_emacs_vars(message["args"])
-        else:
-            logger.error("Unsupported command %s", message["command"])
+        try:
+            if message["command"] == "get_emacs_func_result":
+                result = get_emacs_func_result(message["method"], *message["args"])
+            elif message["command"] == "get_emacs_vars":
+                result = get_emacs_vars(message["args"])
+            else:
+                logger.error("Unsupported command %s", message["command"])
+                result = None
+        except Exception as e:
+            logger.error(f"Error handling elisp RPC: {e}")
             result = None
 
         message["result"] = result
